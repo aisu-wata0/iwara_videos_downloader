@@ -18,11 +18,23 @@ videos_globs: Union[list, str] = "**/*.mp4"
 videos_filepath: str = "videos.json"
 
 # Either a list of urls or video_ids or a file with a list of ids/urls (list in python format) or a .json file generated while scraping liked videos
-videos_list: Union[list, str] = "videos.json"
-# videos_list: Union[list, str] = [
+videos_list: Union[list, str] = [
 #     "wm0jefm1mbi2ldojn",
-# ]
+]
 
+# Whether your liked videos list should be obtained and then downloaded
+get_liked_videos = True # False
+
+# %%
+
+# Stop getting videos when page gets only videos you already know about
+# # (i.e. you reached the pages you already got when you last executed)
+break_when_no_new_videos = True
+
+# Even when no download is needed, get video metadata from the website
+# (Update views, likes, title, etc. in the metadata file)
+# ! ALL VIDEOS
+update_metadata = False
 
 # how many tries to get the download link from its page
 # sometimes Iwara does fail for no reason
@@ -30,15 +42,6 @@ videos_list: Union[list, str] = "videos.json"
 timeout_tries = 3
 timeout_sleep = 3
 # Timedout failures will be logged to a file
-
-
-# Stop getting videos when page gets only videos you already know about
-# # (i.e. you reached the pages you already got when you last executed)
-break_when_no_new_videos = True
-# Even when no download is needed, get video metadata from the website
-# (Update views, likes, title, etc. in the metadata file)
-# ! ALL VIDEOS
-update_metadata = False
 
 # %%
 

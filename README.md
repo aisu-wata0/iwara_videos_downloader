@@ -1,6 +1,12 @@
 
 # Iwara video downloader
 
+## Run it
+
+`python get_vids.py`
+
+Do the setup and config first, of course.
+
 ## Setup
 
 Install the python packages needed.
@@ -8,6 +14,22 @@ Install the python packages needed.
 `pip install -r requirements.txt`
 
 ## Config
+
+Define the directory you keep your video files in `get_vids_setting.py` on the variable `videos_base_dirs`. There's an example right above it. This is so you don't download duplicates.
+
+The download directory is defined in `download_dir`. By default it will download videos in the repository folder `"downloads/"`, which might be not what you want.
+
+Decide if you want to check your liked videos and download them (if they can't be found in your listed directories). `True` by default, if you don't want that, disable `get_liked_videos` (set it to False).
+
+If you want to download a list of links or video ids, list them in the variable `videos_list`, there's and example commented there already, but here's another one anyway:
+
+```python
+videos_list: Union[list, str] = [
+	"wm0jefm1mbi2ldojn",
+]
+```
+
+### Cookies
 
 To get your liked videos, and download videos in general you need to set your session cookies.
 

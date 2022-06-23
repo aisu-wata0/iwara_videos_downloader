@@ -135,63 +135,64 @@ print(f"Found existing {len(videos.keys())} in {filepath} cache")
 
 # %%
 
-page_num = 0
-videos_new = {}
+if get_liked_videos:
+    page_num = 0
+    videos_new = {}
 
-try:
-    while True:
-        video_download_url = (
-            "https://ecchi.iwara.tv/user/liked?page="
-            + urllib.parse.quote(str(page_num))
-        )
-        print("Getting... ", video_download_url)
-        soup = bypassRead(video_download_url)
-        # class_str = "node-teaser"
-        class_str = "node-video"
-        items = soup.find_all("div", class_=class_str)
-        if not items:
-            print("No items found, breaking from loop")
-            break
-        print("Got ", len(items), " items")
-        new_items = 0
-        for item in items:
-            item_link = item.find("a")
-            if item_link is not None:
-                vid_id = item_link.get("href").split("/")[-1]
-                if vid_id not in videos:
-                    new_items += 1
-                    videos_new[vid_id] = {
-                        "title": item.find("h3", class_="title").text,
-                        "username": item.find("a", class_="username").text,
-                        "thumbnail": item.find("img").get("src"),
-                        "likes": item.find("div", class_="right-icon").text.strip(),
-                        "views": item.find("div", class_="left-icon").text.strip(),
-                    }
-
-        print(new_items, " new items")
-
-        page_num += 1
-        if break_when_no_new_videos:
-            if not new_items:
+    try:
+        while True:
+            video_download_url = (
+                "https://ecchi.iwara.tv/user/liked?page="
+                + urllib.parse.quote(str(page_num))
+            )
+            print("Getting... ", video_download_url)
+            soup = bypassRead(video_download_url)
+            # class_str = "node-teaser"
+            class_str = "node-video"
+            items = soup.find_all("div", class_=class_str)
+            if not items:
+                print("No items found, breaking from loop")
                 break
+            print("Got ", len(items), " items")
+            new_items = 0
+            for item in items:
+                item_link = item.find("a")
+                if item_link is not None:
+                    vid_id = item_link.get("href").split("/")[-1]
+                    if vid_id not in videos:
+                        new_items += 1
+                        videos_new[vid_id] = {
+                            "title": item.find("h3", class_="title").text,
+                            "username": item.find("a", class_="username").text,
+                            "thumbnail": item.find("img").get("src"),
+                            "likes": item.find("div", class_="right-icon").text.strip(),
+                            "views": item.find("div", class_="left-icon").text.strip(),
+                        }
 
-except KeyboardInterrupt as e:
-    print("Stopped by keyboard interrupt")
-except Exception as e:
-    print("Caught exception")
-    logging.exception(e)
+            print(new_items, " new items")
 
-if videos_new:
-    videos = {**videos_new, **videos}
+            page_num += 1
+            if break_when_no_new_videos:
+                if not new_items:
+                    break
 
-    print(len(videos.keys()), " videos total,", len(videos_new.keys()), " new")
+    except KeyboardInterrupt as e:
+        print("Stopped by keyboard interrupt")
+    except Exception as e:
+        print("Caught exception")
+        logging.exception(e)
 
-    def saveNoInterrupt0():
-        save_file_json(videos_filepath, videos)
+    if videos_new:
+        videos = {**videos_new, **videos}
 
-    a = Thread(target=saveNoInterrupt0)
-    a.start()
-    a.join()
+        print(len(videos.keys()), " videos total,", len(videos_new.keys()), " new")
+
+        def saveNoInterrupt0():
+            save_file_json(videos_filepath, videos)
+
+        a = Thread(target=saveNoInterrupt0)
+        a.start()
+        a.join()
 # %%
 
 import ast
@@ -210,10 +211,6 @@ def open_data_file(filepath):
         logging.exception(e)
     return None
 
-
-# videos = open_data_file(videos_filepath) or {}
-
-print(f"Found existing {len(videos.keys())} in {filepath} {videos_filepath}")
 
 if videos_list:
     if isinstance(videos_list, str):
