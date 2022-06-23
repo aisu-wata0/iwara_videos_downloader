@@ -1,0 +1,4 @@
+tqdm
+beautifulsoup4
+requests
+selenium
