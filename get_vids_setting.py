@@ -19,11 +19,25 @@ videos_filepath: str = "videos.json"
 
 # Either a list of urls or video_ids or a file with a list of ids/urls (list in python format) or a .json file generated while scraping liked videos
 videos_list: Union[list, str] = [
-#     "wm0jefm1mbi2ldojn",
+    #     "wm0jefm1mbi2ldojn",
+]
+# regex replacement to make urls into ids, ignore if you don't know what regex is.
+# https://ecchi\.iwara\.tv/videos/(.*)$
+# "$1",
+
+# delete videos from the list
+delete_videos = [
+    # "y8enesm6qoh5evz36",
 ]
 
 # Whether your liked videos list should be obtained and then downloaded
-get_liked_videos = True # False
+get_liked_videos = False  # False
+
+# Whether existing videos should be renamed following the formatting variable `filename_download` above
+# Can be a list of directories of which only the files withing will be renamed
+rename_existing_videos: Union[bool, list] = False
+rename_avoid_regex = [] # if these regexes are found on the filename, they wont be renamed
+# rename_existing_videos: Union[bool,list] = ["E:/lewd/iwara/wrong_filenames"]
 
 # %%
 

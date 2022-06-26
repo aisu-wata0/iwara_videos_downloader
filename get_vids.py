@@ -313,10 +313,11 @@ for videos_base_dir in [*videos_base_dirs, download_dir]:
         for f in Path(videos_base_dir).glob(videos_glob):
             # get video ids from filename
             video_id = get_video_id_from_filename(f.stem)
-            if video_id:
-                existing_videos[video_id] = str(f)
-            else:
-                existing_videos[str(f.stem)] = str(f)
+            if video_id not in existing_videos:
+                if video_id:
+                    existing_videos[video_id] = str(f)
+                else:
+                    existing_videos[str(f.stem)] = str(f)
 
 # sort by key length
 existing_videos = {
@@ -327,9 +328,81 @@ save_file_json("existing_videos.json", existing_videos)
 
 # %%
 
-downloaded_videos = {}
+removed_videos = []
+
+for i in delete_videos:
+    if i in videos:
+        print(f"# removed {i}")
+        del videos[i]
+        removed_videos.append(i)
+    if i in existing_videos:
+        print(f'rm "{existing_videos[i]}"')
+        try:
+            Path(existing_videos[i]).unlink()
+        except FileNotFoundError as e:
+            pass
+        except Exception as e:
+            print(f"# Error while deleting file {existing_videos[i]}: ", str(e))
+
+if removed_videos:
+    save_file_json("videos_removed.json", removed_videos)
+
+# %%
 
 filename_invalid_chars = re.compile(r"[\s\?\\/:*?？\"<>\|]+")
+
+if rename_existing_videos:
+    for video_id in existing_videos.keys():
+        if video_id not in videos:
+            continue
+        if rename_existing_videos and (
+            type(rename_existing_videos) in (bool,)
+            or (
+                isinstance(rename_existing_videos, (list, tuple))
+                and any(
+                    (
+                        str(Path(existing_videos[video_id])).startswith(p)
+                        for p in rename_existing_videos
+                    )
+                )
+            )
+        ) and not any(re.search(r, existing_videos[video_id]) for r in rename_avoid_regex):
+            filename = (
+                filename_download.format(
+                    username=videos[video_id]["username"],
+                    title=videos[video_id]["title"],
+                    date_str=videos[video_id]["date"],
+                    video_id=video_id,
+                )
+                + Path(existing_videos[video_id]).suffix
+            )
+            filename = filename_invalid_chars.sub(" ", filename)
+            filepath = Path(existing_videos[video_id]).parent / filename
+
+            if not re.match(r"^[0-9T-]{16,16}$", videos[video_id]["date"]):
+                print(
+                    f'Error on renaming video_id {video_id}: date in metadata is wrong (fix its entry in videos.json)  "{Path(existing_videos[video_id])}"'
+                )
+                continue
+            try:
+                Path(existing_videos[video_id]).rename(filepath)
+            except OSError:
+                print(
+                    f'Error on renaming video_id {video_id}: mv  "{Path(existing_videos[video_id])}"   "{filepath}"'
+                )
+
+# %%
+def saveNoInterrupt2():
+    save_file_json(videos_filepath, videos)
+
+
+a = Thread(target=saveNoInterrupt2)
+a.start()
+a.join()
+# %%
+
+downloaded_videos = {}
+
 
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -372,7 +445,7 @@ try:
         if "privated" in videos[video_id] and videos[video_id]["privated"]:
             skip = True
         if not skip:
-            for id_existing, filename in existing_videos.items():
+            for id_existing, filepath in existing_videos.items():
                 if not re_video_id_valid.match(id_existing):
                     if (
                         "title" in videos[video_id]
@@ -382,7 +455,7 @@ try:
                             {
                                 "video_id": video_id,
                                 "title": videos[video_id]["title"],
-                                "filename_existing": filename,
+                                "filepath_existing": str(filepath),
                             }
                         )
                         skip = True
@@ -432,9 +505,7 @@ try:
                     except Exception as e:
                         logging.exception(e)
 
-                    print(videos[video_id])
-
-                    WebDriverWait(driver, 2).until(
+                    WebDriverWait(driver, 7).until(
                         EC.presence_of_element_located(
                             (By.CSS_SELECTOR, "#download-options a")
                         )
@@ -457,7 +528,17 @@ try:
                     submitted_str = driver.find_elements(
                         by=By.CLASS_NAME, value=class_name
                     )[0]
-                    date_str = submitted_str.text.split("on ")[1].strip()
+                    print("submitted_str.text", submitted_str.text)
+                    date_str = ""
+                    date_split_strs = ["作成日:", "on "]
+                    for ds in date_split_strs:
+                        try:
+                            date_str = submitted_str.text.split()[1].strip()
+                            break
+                        except IndexError:
+                            pass
+                    if not date_str:
+                        raise Exception(f"No date string found for video {video_id}")
                     date_str = re.sub(" ", "T", date_str)
                     date_str = re.sub(":", "-", date_str)
                     videos[video_id]["date"] = date_str
@@ -478,7 +559,7 @@ try:
                         filename_download.format(
                             username=videos[video_id]["username"],
                             title=videos[video_id]["title"],
-                            date_str=date_str,
+                            date_str=videos[video_id]["date"],
                             video_id=video_id,
                         )
                         + video_ext
@@ -533,7 +614,11 @@ except KeyboardInterrupt as e:
 except Exception as e:
     print("Caught exception")
     logging.exception(e)
-driver.close()
+
+try:
+    driver.close()
+except Exception as e:
+    logging.exception(e)
 
 
 def saveNoInterrupt():
