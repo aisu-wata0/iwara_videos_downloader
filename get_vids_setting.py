@@ -34,6 +34,7 @@ delete_videos = [
 get_liked_videos = False  # False
 try_downloading_privated_videos = False  # False
 overwrite_small_files = True  # False
+like_videos_downloaded = True  # False
 
 # Whether existing videos should be renamed following the formatting variable `filename_download` above
 # Can be a list of directories of which only the files withing will be renamed

@@ -409,7 +409,10 @@ a.join()
 
 downloaded_videos = {}
 redownloads = {}
+liked_videos = []
 
+from selenium.webdriver.remote.remote_connection import LOGGER
+LOGGER.setLevel(logging.ERROR)
 
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -488,7 +491,7 @@ try:
         try:
             for i in range(timeout_tries):
                 try:
-                    print("\nGetting... ", video_id, video_download_url)
+                    print("\n...Getting... ", video_id, video_download_url)
                     driver.get(video_download_url)
                     # # take a screenshot of the page
                     # driver.save_screenshot(f"{video_id}.png")
@@ -502,7 +505,7 @@ try:
                             != "hidden"
                         ):
                             print(
-                                "FAIL: Processing video, please check back in a while\n\n"
+                                "FAIL: Processing video, please check back in a while\n"
                             )
                             continue
                     except IndexError:
@@ -578,6 +581,21 @@ try:
                     date_str = re.sub(" ", "T", date_str)
                     date_str = re.sub(":", "-", date_str)
                     videos[video_id]["date"] = date_str
+
+                    if like_videos_downloaded:
+                        try:
+                            print("Liking video...\n")
+                            node_buttons = driver.find_elements(
+                                by=By.CLASS_NAME, value="node-buttons"
+                            )[0]
+                            like_button = node_buttons.find_elements(
+                                by=By.TAG_NAME, value="a"
+                            )[0]
+                            if "Like".lower() in like_button.text.lower() and "Unlike".lower() not in like_button.text.lower():
+                                like_button.click()
+                                liked_videos.append(video_id)
+                        except Exception as e:
+                            logging.exception(e)
 
                     if skip and not overwrite_small_files:
                         break
@@ -686,6 +704,7 @@ except Exception as e:
 def saveNoInterrupt():
     save_file_json(videos_filepath, videos)
     save_file_json("redownloads.json", redownloads)
+    save_file_json("liked_videos.json", liked_videos)
     save_file_json(
         "skipped.json", {"skipped_by_name": skipped_by_name, "skipped": skipped}
     )
