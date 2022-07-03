@@ -447,6 +447,7 @@ try:
         filepath = None
         skip = False
         existing_file = None
+        privated = False
         if video_id in existing_videos:
             skipped.append(video_id)
             existing_file = existing_videos[video_id]
@@ -454,6 +455,7 @@ try:
         if not try_downloading_privated_videos and (
             "privated" in videos[video_id] and videos[video_id]["privated"]
         ):
+            privated = True
             skip = True
         if not skip:
             for id_existing, filepath in existing_videos.items():
@@ -479,7 +481,7 @@ try:
                         existing_file = str(filepath)
                         break
 
-        if skip and not overwrite_small_files and not not update_metadata:
+        if privated or (skip and not overwrite_small_files and not not update_metadata):
             continue
 
         video_download_url = url_base + f"videos/{video_id}"
