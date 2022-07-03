@@ -355,18 +355,24 @@ if rename_existing_videos:
     for video_id in existing_videos.keys():
         if video_id not in videos:
             continue
-        if rename_existing_videos and (
-            type(rename_existing_videos) in (bool,)
-            or (
-                isinstance(rename_existing_videos, (list, tuple))
-                and any(
-                    (
-                        str(Path(existing_videos[video_id])).startswith(p)
-                        for p in rename_existing_videos
+        if (
+            rename_existing_videos
+            and (
+                type(rename_existing_videos) in (bool,)
+                or (
+                    isinstance(rename_existing_videos, (list, tuple))
+                    and any(
+                        (
+                            str(Path(existing_videos[video_id])).startswith(p)
+                            for p in rename_existing_videos
+                        )
                     )
                 )
             )
-        ) and not any(re.search(r, existing_videos[video_id]) for r in rename_avoid_regex):
+            and not any(
+                re.search(r, existing_videos[video_id]) for r in rename_avoid_regex
+            )
+        ):
             filename = (
                 filename_download.format(
                     username=videos[video_id]["username"],
@@ -402,6 +408,7 @@ a.join()
 # %%
 
 downloaded_videos = {}
+redownloads = {}
 
 
 from selenium import webdriver
@@ -439,10 +446,14 @@ try:
     for video_id in list(videos.keys())[:]:
         filepath = None
         skip = False
+        existing_file = None
         if video_id in existing_videos:
             skipped.append(video_id)
+            existing_file = existing_videos[video_id]
             skip = True
-        if "privated" in videos[video_id] and videos[video_id]["privated"]:
+        if not try_downloading_privated_videos and (
+            "privated" in videos[video_id] and videos[video_id]["privated"]
+        ):
             skip = True
         if not skip:
             for id_existing, filepath in existing_videos.items():
@@ -459,19 +470,41 @@ try:
                             }
                         )
                         skip = True
+                        if video_id not in existing_videos:
+                            existing_videos[video_id] = str(filepath)
+                        else:
+                            logging.warning(
+                                f"Skipped two videos suspected to having the same title:\n{str(filepath)}\n{existing_videos[video_id]}\nid={video_id}\n"
+                            )
+                        existing_file = str(filepath)
                         break
-        if skip:
-            if not update_metadata:
-                continue
+
+        if skip and not overwrite_small_files and not not update_metadata:
+            continue
 
         video_download_url = url_base + f"videos/{video_id}"
         try:
             for i in range(timeout_tries):
                 try:
-                    print("Getting... ", video_id, video_download_url)
+                    print("\nGetting... ", video_id, video_download_url)
                     driver.get(video_download_url)
                     # # take a screenshot of the page
                     # driver.save_screenshot(f"{video_id}.png")
+                    try:
+                        video_is_processing = driver.find_elements(
+                            by=By.ID, value="video-processing"
+                        )[0]
+                        if (
+                            video_is_processing
+                            and video_is_processing.value_of_css_property("visibility")
+                            != "hidden"
+                        ):
+                            print(
+                                "FAIL: Processing video, please check back in a while\n\n"
+                            )
+                            continue
+                    except IndexError:
+                        pass
                     try:
                         download_button = driver.find_elements(
                             by=By.ID, value="download-button"
@@ -528,12 +561,13 @@ try:
                     submitted_str = driver.find_elements(
                         by=By.CLASS_NAME, value=class_name
                     )[0]
-                    print("submitted_str.text", submitted_str.text)
                     date_str = ""
                     date_split_strs = ["作成日:", "on "]
                     for ds in date_split_strs:
+                        if ds not in submitted_str.text:
+                            continue
                         try:
-                            date_str = submitted_str.text.split()[1].strip()
+                            date_str = submitted_str.text.split(ds)[-1].strip()
                             break
                         except IndexError:
                             pass
@@ -543,7 +577,7 @@ try:
                     date_str = re.sub(":", "-", date_str)
                     videos[video_id]["date"] = date_str
 
-                    if skip:
+                    if skip and not overwrite_small_files:
                         break
                     # Download
                     Path(download_dir).mkdir(parents=True, exist_ok=True)
@@ -567,17 +601,48 @@ try:
                     # filename = f"{videos[video_id]['username']} - {videos[video_id]['title']} {date_str} {video_id}.mp4"
                     filename = filename_invalid_chars.sub(" ", filename)
                     filepath = str(Path(download_dir) / filename)
-                    print(filepath)
-                    print("")
-                    with open(filepath, "wb") as handle:
-                        total = None
-                        if content_length_str:
-                            total = math.ceil(int(content_length_str) / chunk_size)
-                        for data in tqdm(
-                            response.iter_content(chunk_size), total=total, **tqdm_args
-                        ):
-                            handle.write(data)
-                    downloaded_videos[video_id] = videos[video_id]
+                    totalMB = None
+                    if content_length_str:
+                        totalMB = math.ceil(int(content_length_str) / chunk_size)
+                    # check if enough disk space is available
+                    _, _, diskFree = shutil.disk_usage(download_dir)
+                    diskFreeMB = diskFree // (2**20)
+                    if isinstance(totalMB, int) and diskFreeMB < totalMB:
+                        raise OSError("[Errno 28] No space left on device")
+
+                    existingMB = None
+                    if existing_file:
+                        existingMB = math.ceil(
+                            os.path.getsize(existing_file) / (2**20)
+                        )
+                    existing_file_is_incomplete = (
+                        existingMB and totalMB and (existingMB < totalMB)
+                    )
+                    if not existingMB or (
+                        overwrite_small_files and existing_file_is_incomplete
+                    ):
+                        if existing_file_is_incomplete and existing_file:
+                            print(f"Redownloading file {existing_file}")
+                            print(f"It has only {existingMB}MB out of {totalMB}MB")
+                            filepath = Path(existing_file).parent / Path(filepath).name
+                            redownloads[video_id] = [existing_file, filepath]
+                        print(filepath)
+                        print("")
+                        try:
+                            with open(filepath, "wb") as handle:
+                                for data in tqdm(
+                                    response.iter_content(chunk_size),
+                                    total=totalMB,
+                                    **tqdm_args,
+                                ):
+                                    handle.write(data)
+                        except Exception as e:
+                            if filepath and os.path.exists(filepath):
+                                os.remove(filepath)
+                            raise
+                        if existing_file and existing_file != filepath:
+                            os.remove(existing_file)
+                        downloaded_videos[video_id] = videos[video_id]
                     break
                 except TimeoutException as e:
                     print("Timeout")
@@ -595,7 +660,7 @@ try:
                         time.sleep(timeout_sleep)
                     continue
         except KeyboardInterrupt as e:
-            if filepath:
+            if filepath and os.path.exists(filepath):
                 os.remove(filepath)
             raise
         except Exception as e:
@@ -615,14 +680,10 @@ except Exception as e:
     print("Caught exception")
     logging.exception(e)
 
-try:
-    driver.close()
-except Exception as e:
-    logging.exception(e)
-
 
 def saveNoInterrupt():
     save_file_json(videos_filepath, videos)
+    save_file_json("redownloads.json", redownloads)
     save_file_json(
         "skipped.json", {"skipped_by_name": skipped_by_name, "skipped": skipped}
     )
@@ -637,3 +698,8 @@ a.join()
 
 print("Done")
 # %%
+
+try:
+    driver.quit()
+except Exception as e:
+    pass

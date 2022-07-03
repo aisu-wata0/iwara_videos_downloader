@@ -12,7 +12,7 @@ videos_base_dirs: Union[list, str] = r""
 download_dir = "downloads/"
 # glob pattern to recognize video files, its a pathlib Path glob, so it accepts recursive glob.
 # default = "**/*.mp4"
-videos_globs: Union[list, str] = "**/*.mp4"
+videos_globs: Union[list, str] = ["**/*.mp4", "**/*.webm", "**/*.mkv"]
 # File in which scraped videos are stored, with metadata.
 # videos in here will be downloaded.
 videos_filepath: str = "videos.json"
@@ -32,6 +32,8 @@ delete_videos = [
 
 # Whether your liked videos list should be obtained and then downloaded
 get_liked_videos = False  # False
+try_downloading_privated_videos = False  # False
+overwrite_small_files = True  # False
 
 # Whether existing videos should be renamed following the formatting variable `filename_download` above
 # Can be a list of directories of which only the files withing will be renamed
