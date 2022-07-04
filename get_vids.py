@@ -484,7 +484,7 @@ try:
                         existing_file = str(filepath)
                         break
 
-        if privated or (skip and not overwrite_small_files and not not update_metadata):
+        if privated or (skip and not update_metadata):
             continue
 
         video_download_url = url_base + f"videos/{video_id}"
@@ -584,16 +584,25 @@ try:
 
                     if like_videos_downloaded:
                         try:
-                            print("Liking video...\n")
                             node_buttons = driver.find_elements(
                                 by=By.CLASS_NAME, value="node-buttons"
                             )[0]
-                            like_button = node_buttons.find_elements(
+                            buttons = node_buttons.find_elements(
                                 by=By.TAG_NAME, value="a"
-                            )[0]
-                            if "Like".lower() in like_button.text.lower() and "Unlike".lower() not in like_button.text.lower():
-                                like_button.click()
-                                liked_videos.append(video_id)
+                            )
+                            like_button = None
+                            for b in buttons:
+                                if "Like".lower() in b.text.lower():
+                                    like_button = b
+                            if like_button:
+                                not_liked = "Like".lower() in like_button.text.lower() and "Unlike".lower() not in like_button.text.lower()
+                                videos[video_id]["liked"] = not not_liked
+                                if not_liked:
+                                    like_button.click()
+                                    WebDriverWait(driver, 3).until(EC.visibility_of_element_located((By.ID, "_nonexistantID_")))
+                                    liked_videos.append(video_id)
+                        except TimeoutException as e:
+                            pass
                         except Exception as e:
                             logging.exception(e)
 
@@ -645,7 +654,7 @@ try:
                             print(f"Redownloading file {existing_file}")
                             print(f"It has only {existingMB}MB out of {totalMB}MB")
                             filepath = Path(existing_file).parent / Path(filepath).name
-                            redownloads[video_id] = [existing_file, filepath]
+                            redownloads[video_id] = [str(existing_file), str(filepath)]
                         print(filepath)
                         print("")
                         try:
