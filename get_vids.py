@@ -94,17 +94,15 @@ def save_file_pickle(filepath, data):
 
 
 # %%
-# Bypassing Error 403
-# User-Agent
 
 
-def bypassOpen(url):
+def openUrl(url):
     response = requests.get(url, headers=headers, cookies=cookies)
     return response
 
 
-def bypassRead(address):
-    response = bypassOpen(address)
+def readUrl(address):
+    response = openUrl(address)
     if response.status_code == 200:
         html = BeautifulSoup(response.content, "html.parser")
         error_string = "404: Page Not Found"
@@ -115,6 +113,21 @@ def bypassRead(address):
         raise Exception(
             f"Error while reading url, response.status_code={response.status_code}"
         )
+
+
+# %%
+def get_date_str(text):
+    date_str = ""
+    date_split_strs = ["作成日:", "on "]
+    for ds in date_split_strs:
+        if ds not in text:
+            continue
+        try:
+            date_str = text.split(ds)[-1].strip()
+            break
+        except IndexError:
+            pass
+    return date_str
 
 
 # %%
@@ -146,7 +159,7 @@ if get_liked_videos:
                 + urllib.parse.quote(str(page_num))
             )
             print("Getting... ", video_download_url)
-            soup = bypassRead(video_download_url)
+            soup = readUrl(video_download_url)
             # class_str = "node-teaser"
             class_str = "node-video"
             items = soup.find_all("div", class_=class_str)
@@ -161,13 +174,15 @@ if get_liked_videos:
                     vid_id = item_link.get("href").split("/")[-1]
                     if vid_id not in videos:
                         new_items += 1
-                        videos_new[vid_id] = {
-                            "title": item.find("h3", class_="title").text,
-                            "username": item.find("a", class_="username").text,
-                            "thumbnail": item.find("img").get("src"),
-                            "likes": item.find("div", class_="right-icon").text.strip(),
-                            "views": item.find("div", class_="left-icon").text.strip(),
-                        }
+                    videos_new[vid_id] = {
+                        "title": item.find("h3", class_="title").text,
+                        "username": item.find("a", class_="username").text,
+                        "views": item.find("div", class_="left-icon").text.strip(),
+                        "likes": item.find("div", class_="right-icon").text.strip(),
+                    }
+                    node_img = item.find("img")
+                    if node_img:
+                        videos_new[vid_id]["thumbnail"] = node_img.get("src")
 
             print(new_items, " new items")
 
@@ -193,6 +208,259 @@ if get_liked_videos:
         a = Thread(target=saveNoInterrupt0)
         a.start()
         a.join()
+
+# %%
+
+searches = {}
+filepath = searches_filepath
+try:
+    with open(filepath, "rb") as f:
+        searches = json.load(f)
+except FileNotFoundError:
+    logging.warning(
+        f"Cache file {filepath} not found, hopefully this is your first time running this script."
+    )
+except Exception as e:
+    logging.exception(e)
+print(f"Found existing {len(searches.keys())} in {filepath} cache")
+
+
+# %%
+
+
+def get_search_videos(search_query):
+    page_num = 0
+    searches_new = {}
+
+    try:
+        while True:
+            video_download_url = f"https://www.iwara.tv/search?query={urllib.parse.quote(str(search_query))}&page={urllib.parse.quote(str(page_num))}"
+            print("Getting... ", video_download_url)
+            soup = readUrl(video_download_url)
+            class_str = "views-column"
+            items = soup.find_all("div", class_=class_str)
+            if not items:
+                print("No items found, breaking from loop")
+                break
+            print("Got ", len(items), " items")
+            new_items = 0
+            for item in items:
+                node_username = item.find("a", class_="username")
+                if node_username is not None:
+                    node_title = None
+                    title = None
+                    for tt in ["h1", "h3"]:
+                        node_title = item.find(tt, class_="title")
+                        if node_title:
+                            title = node_title.text.strip()
+                            break
+                    if node_title is None:
+                        continue
+                    vid_id = None
+                    is_image = False
+                    node_vid_id = node_title.find("a")
+                    if node_vid_id:
+                        vid_id = node_vid_id.get("href").split("/")[-1]
+                    else:
+                        is_image = True
+                        node_share = item.find("div", class_="share-icons").find("a")
+                        vid_id = node_share.get("href").split("/")[-1].split("%2F")[-1]
+                    print(vid_id)
+                    if vid_id not in searches.get(search_query, {}):
+                        new_items += 1
+                    searches_new[vid_id] = {
+                        "username": node_username.text,
+                    }
+                    searches_new[vid_id]["title"] = title
+                    searches_new[vid_id]["is_image"] = is_image
+                    node_img = item.find("img")
+                    if node_img:
+                        searches_new[vid_id]["thumbnail"] = node_img.get("src")
+                    node_views = item.find("div", class_="node-views")
+                    if node_views:
+                        searches_new[vid_id]["views"] = node_views.text.strip()
+
+                    video_info = item.find("div", class_="video-info")
+                    if video_info:
+                        searches_new[vid_id]["views"] = video_info.text.strip().split()[
+                            0
+                        ]
+                        searches_new[vid_id]["likes"] = video_info.text.strip().split()[
+                            -1
+                        ]
+
+                    date_node = item.find("div", class_="submitted")
+                    if date_node:
+                        date_str = get_date_str(date_node.text)
+                        if date_str:
+                            searches_new[vid_id]["date"] = date_str
+                    if "views" in searches_new[vid_id]:
+                        print("views")
+                        print(searches_new[vid_id]["views"])
+                    if "likes" in searches_new[vid_id]:
+                        print("likes")
+                        print(searches_new[vid_id]["likes"])
+            print(new_items, " new items")
+
+            page_num += 1
+            if break_when_no_new_videos and not update_metadata:
+                if not new_items:
+                    break
+
+    except KeyboardInterrupt as e:
+        print("Stopped by keyboard interrupt")
+    except Exception as e:
+        print("Caught exception")
+        logging.exception(e)
+
+    if searches_new:
+        if search_query in searches:
+            searches[search_query] = searches_new
+        else:
+            searches[search_query] = searches_new
+        print(
+            len(searches[search_query].keys()),
+            " items total,",
+            len(searches_new.keys()),
+            " new",
+        )
+
+        def saveNoInterrupt0():
+            save_file_json(searches_filepath, searches)
+
+        a = Thread(target=saveNoInterrupt0)
+        a.start()
+        a.join()
+
+
+def make_html(items, name):
+    with open(f"{name}.html", "w") as outfile:
+        keys = ["username", "title", "thumbnail", "views", "likes", "date" "url"]
+        html_table_id = "iw"
+
+        outfile.write(f'<table id="{html_table_id}" class="searchable  sortable">\n')
+        outfile.write("<thead>\n")
+        outfile.write("\t<tr>\n")
+        for idx, key in enumerate(keys):
+            outfile.write(f'\t<th onclick="sortTable({idx})">' + key + "</th>\n")
+        outfile.write("\t<th>" + "url" + "</th>\n")
+        outfile.write("\t</tr>\n")
+        outfile.write("</thead>\n")
+
+        outfile.write("<tbody>\n")
+        for k, item in items.items():
+            outfile.write("\t<tr>\n")
+            for key in keys:
+                v = " "
+                if key in item:
+                    v = item[key]
+                if key == "thumbnail":
+                    outfile.write(
+                        f'\t\t<td><img src="https://{v[2:]}" style="max-height: 220px;">'
+                        + "</img></td>\n"
+                    )
+                else:
+                    outfile.write("\t\t<td>" + str(v) + "</td>\n")
+            url = (
+                f"https://www.iwara.tv/images/{k}"
+                if item["is_image"]
+                else f"https://www.iwara.tv/videos/{k}"
+            )
+            outfile.write(f'\t\t<td><a href="{url}">' + url + "</a></td>\n")
+            outfile.write("\t</tr>\n")
+        outfile.write("</tbody>\n")
+
+        html_script = (
+            """
+        <script>
+        function sortTable(n) {
+        var table, rows, switching, i, x, y, shouldSwitch, dir, switchcount = 0;
+        table = document.getElementById("""
+            f'"{html_table_id}");'
+            + """
+        switching = true;
+        // Set the sorting direction to ascending:
+        dir = "asc";
+        /* Make a loop that will continue until
+        no switching has been done: */
+        while (switching) {
+            // Start by saying: no switching is done:
+            switching = false;
+            rows = table.rows;
+            /* Loop through all table rows (except the
+            first, which contains table headers): */
+            for (i = 1; i < (rows.length - 1); i++) {
+            // Start by saying there should be no switching:
+            shouldSwitch = false;
+            /* Get the two elements you want to compare,
+            one from current row and one from the next: */
+            x = rows[i].getElementsByTagName("TD")[n];
+            y = rows[i + 1].getElementsByTagName("TD")[n];
+            /* Check if the two rows should switch place,
+            based on the direction, asc or desc: */
+			if (dir == "asc") {
+				var xt = x.innerHTML.toLowerCase().replace(/,/g, "");
+				var yt = y.innerHTML.toLowerCase().replace(/,/g, "");
+				if (isNaN(Number(xt)) || isNaN(Number(yt))) {
+					if (xt > yt) {
+					// If so, mark as a switch and break the loop:
+					shouldSwitch = true;
+					break;
+					}
+				} else {
+					if (Number(xt) > Number(yt)) {
+					// If so, mark as a switch and break the loop:
+					shouldSwitch = true;
+					break;
+					}
+				}
+                
+            } else if (dir == "desc") {
+				var xt = x.innerHTML.toLowerCase().replace(/,/g, "");
+				var yt = y.innerHTML.toLowerCase().replace(/,/g, "");
+				if (isNaN(Number(xt)) || isNaN(Number(yt))) {
+					if (xt < yt) {
+					// If so, mark as a switch and break the loop:
+					shouldSwitch = true;
+					break;
+					}
+				} else {
+					if (Number(xt) < Number(yt)) {
+					// If so, mark as a switch and break the loop:
+					shouldSwitch = true;
+					break;
+					}
+				}
+            }
+            }
+            if (shouldSwitch) {
+            /* If a switch has been marked, make the switch
+            and mark that a switch has been done: */
+            rows[i].parentNode.insertBefore(rows[i + 1], rows[i]);
+            switching = true;
+            // Each time a switch is done, increase this count by 1:
+            switchcount ++;
+            } else {
+            /* If no switching has been done AND the direction is "asc",
+            set the direction to "desc" and run the while loop again. */
+            if (switchcount == 0 && dir == "asc") {
+                dir = "desc";
+                switching = true;
+            }
+            }
+        }
+        }
+        </script>
+        """
+        )
+
+        outfile.write(html_script)
+
+
+for search_query in [search_queries]:
+    get_search_videos(search_query)
+    make_html(searches[search_query], f"search-{search_query}")
+
 # %%
 
 import ast
@@ -280,7 +548,7 @@ def get_video_id_from_filename(fname):
             video_id = match.group(group_idx)
             break
     if not matched:
-        video_id = fname.split(" ")[-1].lower()
+        video_id = fname.split()[-1].lower()
         video_id = video_id.split("_source")[0]
         video_id = video_id.split("_")[-1]
         video_id = video_id_inv_chars.sub("", video_id)
@@ -349,7 +617,6 @@ if removed_videos:
 
 # %%
 
-filename_invalid_chars = re.compile(r"[\s\?\\/:*?？\"<>\|]+")
 
 if rename_existing_videos:
     for video_id in existing_videos.keys():
@@ -382,7 +649,7 @@ if rename_existing_videos:
                 )
                 + Path(existing_videos[video_id]).suffix
             )
-            filename = filename_invalid_chars.sub(" ", filename)
+            filename = re_filename_invalid_chars.sub(" ", filename)
             filepath = Path(existing_videos[video_id]).parent / filename
 
             if not re.match(r"^[0-9T-]{16,16}$", videos[video_id]["date"]):
@@ -412,6 +679,7 @@ redownloads = {}
 liked_videos = []
 
 from selenium.webdriver.remote.remote_connection import LOGGER
+
 LOGGER.setLevel(logging.ERROR)
 
 from selenium import webdriver
@@ -534,12 +802,12 @@ try:
                             node_text = driver.find_elements(
                                 by=By.CLASS_NAME, value="node-views"
                             )[0].text.strip()
-                            videos[video_id]["likes"] = node_text.split(" ")[0]
+                            videos[video_id]["likes"] = node_text.split()[0]
                         if update_metadata or "views" not in videos[video_id]:
                             node_text = driver.find_elements(
                                 by=By.CLASS_NAME, value="node-views"
                             )[0].text.strip()
-                            videos[video_id]["views"] = node_text.split(" ")[1]
+                            videos[video_id]["views"] = node_text.split()[1]
                     except Exception as e:
                         logging.exception(e)
 
@@ -562,20 +830,12 @@ try:
                         if "file=" in ext_split[i]:
                             video_ext = "." + ext_split[i].split(".")[-1]
                     #
+
                     class_name = "submitted"
                     submitted_str = driver.find_elements(
                         by=By.CLASS_NAME, value=class_name
                     )[0]
-                    date_str = ""
-                    date_split_strs = ["作成日:", "on "]
-                    for ds in date_split_strs:
-                        if ds not in submitted_str.text:
-                            continue
-                        try:
-                            date_str = submitted_str.text.split(ds)[-1].strip()
-                            break
-                        except IndexError:
-                            pass
+                    date_str = get_date_str(submitted_str.text)
                     if not date_str:
                         raise Exception(f"No date string found for video {video_id}")
                     date_str = re.sub(" ", "T", date_str)
@@ -595,11 +855,18 @@ try:
                                 if "Like".lower() in b.text.lower():
                                     like_button = b
                             if like_button:
-                                not_liked = "Like".lower() in like_button.text.lower() and "Unlike".lower() not in like_button.text.lower()
+                                not_liked = (
+                                    "Like".lower() in like_button.text.lower()
+                                    and "Unlike".lower() not in like_button.text.lower()
+                                )
                                 videos[video_id]["liked"] = not not_liked
                                 if not_liked:
                                     like_button.click()
-                                    WebDriverWait(driver, 3).until(EC.visibility_of_element_located((By.ID, "_nonexistantID_")))
+                                    WebDriverWait(driver, 3).until(
+                                        EC.visibility_of_element_located(
+                                            (By.ID, "_nonexistantID_")
+                                        )
+                                    )
                                     liked_videos.append(video_id)
                         except TimeoutException as e:
                             pass
@@ -628,7 +895,7 @@ try:
                         + video_ext
                     )
                     # filename = f"{videos[video_id]['username']} - {videos[video_id]['title']} {date_str} {video_id}.mp4"
-                    filename = filename_invalid_chars.sub(" ", filename)
+                    filename = re_filename_invalid_chars.sub(" ", filename)
                     filepath = str(Path(download_dir) / filename)
                     totalMB = None
                     if content_length_str:

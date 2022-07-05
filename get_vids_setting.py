@@ -16,6 +16,7 @@ videos_globs: Union[list, str] = ["**/*.mp4", "**/*.webm", "**/*.mkv"]
 # File in which scraped videos are stored, with metadata.
 # videos in here will be downloaded.
 videos_filepath: str = "videos.json"
+searches_filepath: str = "searches.json"
 
 # Either a list of urls or video_ids or a file with a list of ids/urls (list in python format) or a .json file generated while scraping liked videos
 videos_list: Union[list, str] = [
@@ -30,6 +31,11 @@ delete_videos = [
     # "y8enesm6qoh5evz36",
 ]
 
+# Searches will be saved in an html with the name of the query
+search_queries = [
+    # "Model DL",
+]
+
 # Whether your liked videos list should be obtained and then downloaded
 get_liked_videos = False  # False
 try_downloading_privated_videos = False  # False
@@ -41,6 +47,9 @@ like_videos_downloaded = True  # False
 rename_existing_videos: Union[bool, list] = False
 rename_avoid_regex = [] # if these regexes are found on the filename, they wont be renamed
 # rename_existing_videos: Union[bool,list] = ["E:/lewd/iwara/wrong_filenames"]
+
+import re
+re_filename_invalid_chars = re.compile(r"[\s\?\\/:*?？\"<>\|]+")
 
 # %%
 
