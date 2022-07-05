@@ -455,7 +455,7 @@ def make_html(items, name):
         outfile.write(html_script)
 
 
-for search_query in [search_queries]:
+for search_query in search_queries:
     get_search_videos(search_query)
     make_html(searches[search_query], f"search-{search_query}")
 
