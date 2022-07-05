@@ -217,9 +217,7 @@ try:
     with open(filepath, "rb") as f:
         searches = json.load(f)
 except FileNotFoundError:
-    logging.warning(
-        f"Cache file {filepath} not found, hopefully this is your first time running this script."
-    )
+    pass
 except Exception as e:
     logging.exception(e)
 print(f"Found existing {len(searches.keys())} in {filepath} cache")
