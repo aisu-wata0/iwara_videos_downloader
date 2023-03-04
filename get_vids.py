@@ -9,13 +9,12 @@ import math
 import re
 import pickle
 import json
-import urllib.request
-from urllib.error import HTTPError
 import urllib.parse
 from pathlib import Path
 from threading import Thread
 import traceback
 import requests
+from requests.exceptions import HTTPError
 from bs4 import BeautifulSoup
 from tqdm import tqdm
 
@@ -154,12 +153,12 @@ if get_liked_videos:
 
     try:
         while True:
-            video_download_url = (
+            videos_liked_url = (
                 "https://ecchi.iwara.tv/user/liked?page="
                 + urllib.parse.quote(str(page_num))
             )
-            print("Getting... ", video_download_url)
-            soup = readUrl(video_download_url)
+            print("Getting... ", videos_liked_url)
+            soup = readUrl(videos_liked_url)
             # class_str = "node-teaser"
             class_str = "node-video"
             items = soup.find_all("div", class_=class_str)
@@ -199,6 +198,7 @@ if get_liked_videos:
 
     if videos_new:
         videos = {**videos_new, **videos}
+        videos = {k.lower(): v for k, v in videos.items()}
 
         print(len(videos.keys()), " videos total,", len(videos_new.keys()), " new")
 
@@ -232,9 +232,9 @@ def get_search_videos(search_query):
 
     try:
         while True:
-            video_download_url = f"https://www.iwara.tv/search?query={urllib.parse.quote(str(search_query))}&page={urllib.parse.quote(str(page_num))}"
-            print("Getting... ", video_download_url)
-            soup = readUrl(video_download_url)
+            videos_search_url = f"https://www.iwara.tv/search?query={urllib.parse.quote(str(search_query))}&page={urllib.parse.quote(str(page_num))}"
+            print("Getting... ", videos_search_url)
+            soup = readUrl(videos_search_url)
             class_str = "views-column"
             items = soup.find_all("div", class_=class_str)
             if not items:
@@ -287,23 +287,21 @@ def get_search_videos(search_query):
                             -1
                         ]
 
+                    video_field = item.find("div", class_="field-type-text-with-summary")
+                    if video_field:
+                        searches_new[vid_id]["description"] = str(video_field).strip()
+
                     date_node = item.find("div", class_="submitted")
                     if date_node:
                         date_str = get_date_str(date_node.text)
                         if date_str:
                             searches_new[vid_id]["date"] = date_str
-                    if "views" in searches_new[vid_id]:
-                        print("views")
-                        print(searches_new[vid_id]["views"])
-                    if "likes" in searches_new[vid_id]:
-                        print("likes")
-                        print(searches_new[vid_id]["likes"])
             print(new_items, " new items")
 
             page_num += 1
-            if break_when_no_new_videos and not update_metadata:
-                if not new_items:
-                    break
+            # if break_when_no_new_videos and not update_metadata:
+            #     if not new_items:
+            #         break
 
     except KeyboardInterrupt as e:
         print("Stopped by keyboard interrupt")
@@ -493,6 +491,7 @@ if videos_list:
 
 print(f"{len(videos.keys())} videos total")
 
+videos = {k.lower(): v for k, v in videos.items()}
 # %%
 
 skipped = []
@@ -587,39 +586,259 @@ for videos_base_dir in [*videos_base_dirs, download_dir]:
 
 # sort by key length
 existing_videos = {
-    k: v for k, v in sorted(existing_videos.items(), key=lambda item: len(item[0]))
+    k.lower(): v
+    for k, v in sorted(existing_videos.items(), key=lambda item: len(item[0]))
 }
 print("Found ", len(existing_videos.keys()), " existing videos")
 save_file_json("existing_videos.json", existing_videos)
 
 # %%
 
-removed_videos = []
+if delete_videos:
+    removed_videos = []
 
-for i in delete_videos:
-    if i in videos:
-        print(f"# removed {i}")
-        del videos[i]
-        removed_videos.append(i)
-    if i in existing_videos:
-        print(f'rm "{existing_videos[i]}"')
+    for i in delete_videos:
+        i = i.lower()
+        if i in videos:
+            print(f"# removed {i}")
+            del videos[i]
+            removed_videos.append(i)
+        if i in existing_videos:
+            print(f'rm "{existing_videos[i]}"')
+            try:
+                Path(existing_videos[i]).unlink()
+            except FileNotFoundError as e:
+                pass
+            except Exception as e:
+                print(f"# Error while deleting file {existing_videos[i]}: ", str(e))
+
+    if removed_videos:
+        filepath = "videos_removed.json"
         try:
-            Path(existing_videos[i]).unlink()
-        except FileNotFoundError as e:
-            pass
+            with open(filepath, "rb") as f:
+                removed_videos_old = json.load(f)
+                removed_videos = removed_videos_old + removed_videos
+        except FileNotFoundError:
+            logging.warning(
+                f"Cache file {filepath} not found, hopefully this is your first time running this script."
+            )
         except Exception as e:
-            print(f"# Error while deleting file {existing_videos[i]}: ", str(e))
+            logging.exception(e)
 
-if removed_videos:
-    save_file_json("videos_removed.json", removed_videos)
+        save_file_json(filepath, removed_videos)
+
+    filepath = "videos_deleted_total.json"
+    delete_videos_total = delete_videos
+    try:
+        with open(filepath, "rb") as f:
+            delete_videos_old = json.load(f)
+            delete_videos_total = delete_videos_old + delete_videos
+            delete_videos_total = set(delete_videos_total)
+            delete_videos_total = list(delete_videos_total)
+    except FileNotFoundError:
+        logging.warning(
+            f"Cache file {filepath} not found, hopefully this is your first time running this script."
+        )
+    except Exception as e:
+        logging.exception(e)
+
+    save_file_json(filepath, delete_videos_total)
+
+
+# %%
+
+from selenium.webdriver.remote.remote_connection import LOGGER
+
+LOGGER.setLevel(logging.ERROR)
+
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.wait import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.remote.remote_connection import LOGGER as logger_selenium
+logger_selenium.setLevel(logging.WARNING)
+
+# %%
+
+chrome_options = Options()
+chrome_options.add_argument("--headless")
+chrome_options.add_argument("--window-size=1920x1920")
+chrome_options.add_argument("--log-level=3")
+chrome_options.add_argument("--disable-logging")
+
+# download Chrome Webdriver
+# https://sites.google.com/a/chromium.org/chromedriver/download
+# put driver executable file in the script directory
+chrome_driver = os.path.join(os.getcwd(), "chromedriver")
+
+# driver = webdriver.Chrome(options=chrome_options, executable_path=chrome_driver)
+driver = webdriver.Chrome(
+    options=chrome_options, service=Service(ChromeDriverManager().install())
+)
+
+# %%
+
+
+url_base = "https://ecchi.iwara.tv/"
+
+load_timeout = 120
+driver.set_page_load_timeout(load_timeout)
+driver.get(url_base)
+for cookie in cookies.items():
+    driver.add_cookie({"name": cookie[0], "value": cookie[1]})
+
+# %%
+
+
+
+def get_vid_info(video_id, like_video=False, timeout_tries=timeout_tries, timeout_sleep=timeout_sleep):
+    vid_info = {}
+    video_info_url = url_base + f"videos/{video_id}"
+    for i in range(timeout_tries):
+        try:
+            driver.get(video_info_url)
+            
+            if video_id not in videos:
+                videos[video_id] = {}
+            # # take a screenshot of the page
+            # driver.save_screenshot(f"{video_id}.png")
+            try:
+                video_is_processing = driver.find_elements(
+                    by=By.ID, value="video-processing"
+                )[0]
+                if (
+                    video_is_processing
+                    and video_is_processing.value_of_css_property("visibility")
+                    != "hidden"
+                ):
+                    print(
+                        "FAIL: Processing video, please check back in a while\n"
+                    )
+                    return {}
+            except IndexError:
+                pass
+            try:
+                download_button = driver.find_elements(
+                    by=By.ID, value="download-button"
+                )[0]
+            except IndexError:
+                print("-- No download button found, likely privated video")
+                videos[video_id]["privated"] = True
+                return {}
+            if "privated" in videos[video_id]:
+                del videos[video_id]["privated"]
+            download_button.click()
+
+            videos[video_id]["title"] = driver.find_elements(
+                by=By.CLASS_NAME, value="title"
+            )[0].text.strip()
+            if update_metadata or "username" not in videos[video_id]:
+                videos[video_id]["username"] = driver.find_elements(
+                    by=By.CLASS_NAME, value="username"
+                )[0].text.strip()
+            try:
+                if update_metadata or "likes" not in videos[video_id]:
+                    node_text = driver.find_elements(
+                        by=By.CLASS_NAME, value="node-views"
+                    )[0].text.strip()
+                    videos[video_id]["likes"] = node_text.split()[0]
+                if update_metadata or "views" not in videos[video_id]:
+                    node_text = driver.find_elements(
+                        by=By.CLASS_NAME, value="node-views"
+                    )[0].text.strip()
+                    videos[video_id]["views"] = node_text.split()[1]
+            except Exception as e:
+                logging.exception(e)
+
+            WebDriverWait(driver, 7).until(
+                EC.presence_of_element_located(
+                    (By.CSS_SELECTOR, "#download-options a")
+                )
+            )
+            download_options = driver.find_elements(
+                by=By.ID, value="download-options"
+            )[0]
+            download_links = download_options.find_elements(
+                by=By.TAG_NAME, value="a"
+            )
+            download_source = download_links[0]
+            vid_info['video_download_url'] = download_source.get_attribute("href")
+            vid_info['video_ext'] = ".mp4"
+            ext_split = vid_info['video_download_url'].split("&")
+            for i in range(len(ext_split) - 1, -1, -1):
+                if "file=" in ext_split[i]:
+                    vid_info['video_ext'] = "." + ext_split[i].split(".")[-1]
+            #
+
+            class_name = "submitted"
+            submitted_str = driver.find_elements(
+                by=By.CLASS_NAME, value=class_name
+            )[0]
+            date_str = get_date_str(submitted_str.text)
+            if not date_str:
+                raise Exception(f"No date string found for video {video_id}")
+            date_str = re.sub(" ", "T", date_str)
+            date_str = re.sub(":", "-", date_str)
+            videos[video_id]["date"] = date_str
+
+            if like_video:
+                try:
+                    node_buttons = driver.find_elements(
+                        by=By.CLASS_NAME, value="node-buttons"
+                    )[0]
+                    buttons = node_buttons.find_elements(
+                        by=By.TAG_NAME, value="a"
+                    )
+                    like_button = None
+                    for b in buttons:
+                        if "Like".lower() in b.text.lower():
+                            like_button = b
+                    if like_button:
+                        not_liked = (
+                            "Like".lower() in like_button.text.lower()
+                            and "Unlike".lower() not in like_button.text.lower()
+                        )
+                        videos[video_id]["liked"] = not not_liked
+                        if not_liked:
+                            like_button.click()
+                            WebDriverWait(driver, 3).until(
+                                EC.visibility_of_element_located(
+                                    (By.ID, "_nonexistantID_")
+                                )
+                            )
+                            liked_videos.append(video_id)
+                except TimeoutException as e:
+                    pass
+                except Exception as e:
+                    logging.exception(e)
+        
+        except TimeoutException as e:
+            print("Timeout")
+            if i == timeout_tries - 1:
+                print("------ Failed to download it, too many timeouts")
+                errors.append(
+                    {
+                        "error": "Timeout " + str(e),
+                        "video_id": video_id,
+                        "traceback": traceback.format_exc(),
+                    }
+                )
+            else:
+                print("trying again...")
+                time.sleep(timeout_sleep)
+                
+        return vid_info
 
 # %%
 
 
 if rename_existing_videos:
     for video_id in existing_videos.keys():
-        if video_id not in videos:
-            continue
         if (
             rename_existing_videos
             and (
@@ -628,7 +847,7 @@ if rename_existing_videos:
                     isinstance(rename_existing_videos, (list, tuple))
                     and any(
                         (
-                            str(Path(existing_videos[video_id])).startswith(p)
+                            str(Path(existing_videos[video_id]).parent.absolute()).startswith(p)
                             for p in rename_existing_videos
                         )
                     )
@@ -638,17 +857,28 @@ if rename_existing_videos:
                 re.search(r, existing_videos[video_id]) for r in rename_avoid_regex
             )
         ):
-            filename = (
-                filename_download.format(
-                    username=videos[video_id]["username"],
-                    title=videos[video_id]["title"],
-                    date_str=videos[video_id]["date"],
-                    video_id=video_id,
+            print(f"# Try to rename: {video_id} ---- {existing_videos[video_id]}")
+            if video_id not in videos:
+                vid_info = get_vid_info(video_id)
+                if not vid_info:
+                    print("# Failed")
+                    continue
+            print("#", videos[video_id])
+            try:
+                filename = (
+                    filename_download.format(
+                        username=videos[video_id]["username"],
+                        title=videos[video_id]["title"],
+                        date_str=videos[video_id]["date"],
+                        video_id=video_id,
+                    )
+                    + Path(existing_videos[video_id]).suffix
                 )
-                + Path(existing_videos[video_id]).suffix
-            )
-            filename = re_filename_invalid_chars.sub(" ", filename)
-            filepath = Path(existing_videos[video_id]).parent / filename
+                filename = re_filename_invalid_chars.sub(" ", filename)
+                filepath = Path(existing_videos[video_id]).parent / filename
+            except Exception as e:
+                logging.exception(f"# Failed")
+                continue
 
             if not re.match(r"^[0-9T-]{16,16}$", videos[video_id]["date"]):
                 print(
@@ -656,6 +886,7 @@ if rename_existing_videos:
                 )
                 continue
             try:
+                print(f"""mv "{existing_videos[video_id]}"     "{filepath}" """)
                 Path(existing_videos[video_id]).rename(filepath)
             except OSError:
                 print(
@@ -676,41 +907,6 @@ downloaded_videos = {}
 redownloads = {}
 liked_videos = []
 
-from selenium.webdriver.remote.remote_connection import LOGGER
-
-LOGGER.setLevel(logging.ERROR)
-
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.wait import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
-
-chrome_options = Options()
-chrome_options.add_argument("--headless")
-chrome_options.add_argument("--window-size=1920x1920")
-
-# download Chrome Webdriver
-# https://sites.google.com/a/chromium.org/chromedriver/download
-# put driver executable file in the script directory
-chrome_driver = os.path.join(os.getcwd(), "chromedriver")
-
-# driver = webdriver.Chrome(options=chrome_options, executable_path=chrome_driver)
-driver = webdriver.Chrome(
-    options=chrome_options, service=Service(ChromeDriverManager().install())
-)
-
-url_base = "https://ecchi.iwara.tv/"
-
-load_timeout = 120
-driver.set_page_load_timeout(load_timeout)
-driver.get(url_base)
-for cookie in cookies.items():
-    driver.add_cookie({"name": cookie[0], "value": cookie[1]})
 try:
     for video_id in list(videos.keys())[:]:
         filepath = None
@@ -753,131 +949,21 @@ try:
         if privated or (skip and not update_metadata):
             continue
 
-        video_download_url = url_base + f"videos/{video_id}"
+        video_info_url = url_base + f"videos/{video_id}"
         try:
             for i in range(timeout_tries):
                 try:
-                    print("\n...Getting... ", video_id, video_download_url)
-                    driver.get(video_download_url)
-                    # # take a screenshot of the page
-                    # driver.save_screenshot(f"{video_id}.png")
-                    try:
-                        video_is_processing = driver.find_elements(
-                            by=By.ID, value="video-processing"
-                        )[0]
-                        if (
-                            video_is_processing
-                            and video_is_processing.value_of_css_property("visibility")
-                            != "hidden"
-                        ):
-                            print(
-                                "FAIL: Processing video, please check back in a while\n"
-                            )
-                            continue
-                    except IndexError:
-                        pass
-                    try:
-                        download_button = driver.find_elements(
-                            by=By.ID, value="download-button"
-                        )[0]
-                    except IndexError:
-                        print("-- No download button found, likely privated video")
-                        videos[video_id]["privated"] = True
+                    print("\n...Getting... ", video_id, video_info_url)
+                    vid_info = get_vid_info(video_id, like_video=like_videos_downloaded)
+                    if not vid_info:
                         continue
-                    if "privated" in videos[video_id]:
-                        del videos[video_id]["privated"]
-                    download_button.click()
-
-                    videos[video_id]["title"] = driver.find_elements(
-                        by=By.CLASS_NAME, value="title"
-                    )[0].text.strip()
-                    if update_metadata or "username" not in videos[video_id]:
-                        videos[video_id]["username"] = driver.find_elements(
-                            by=By.CLASS_NAME, value="username"
-                        )[0].text.strip()
-                    try:
-                        if update_metadata or "likes" not in videos[video_id]:
-                            node_text = driver.find_elements(
-                                by=By.CLASS_NAME, value="node-views"
-                            )[0].text.strip()
-                            videos[video_id]["likes"] = node_text.split()[0]
-                        if update_metadata or "views" not in videos[video_id]:
-                            node_text = driver.find_elements(
-                                by=By.CLASS_NAME, value="node-views"
-                            )[0].text.strip()
-                            videos[video_id]["views"] = node_text.split()[1]
-                    except Exception as e:
-                        logging.exception(e)
-
-                    WebDriverWait(driver, 7).until(
-                        EC.presence_of_element_located(
-                            (By.CSS_SELECTOR, "#download-options a")
-                        )
-                    )
-                    download_options = driver.find_elements(
-                        by=By.ID, value="download-options"
-                    )[0]
-                    download_links = download_options.find_elements(
-                        by=By.TAG_NAME, value="a"
-                    )
-                    download_source = download_links[0]
-                    video_download_url = download_source.get_attribute("href")
-                    video_ext = ".mp4"
-                    ext_split = video_download_url.split("&")
-                    for i in range(len(ext_split) - 1, -1, -1):
-                        if "file=" in ext_split[i]:
-                            video_ext = "." + ext_split[i].split(".")[-1]
-                    #
-
-                    class_name = "submitted"
-                    submitted_str = driver.find_elements(
-                        by=By.CLASS_NAME, value=class_name
-                    )[0]
-                    date_str = get_date_str(submitted_str.text)
-                    if not date_str:
-                        raise Exception(f"No date string found for video {video_id}")
-                    date_str = re.sub(" ", "T", date_str)
-                    date_str = re.sub(":", "-", date_str)
-                    videos[video_id]["date"] = date_str
-
-                    if like_videos_downloaded:
-                        try:
-                            node_buttons = driver.find_elements(
-                                by=By.CLASS_NAME, value="node-buttons"
-                            )[0]
-                            buttons = node_buttons.find_elements(
-                                by=By.TAG_NAME, value="a"
-                            )
-                            like_button = None
-                            for b in buttons:
-                                if "Like".lower() in b.text.lower():
-                                    like_button = b
-                            if like_button:
-                                not_liked = (
-                                    "Like".lower() in like_button.text.lower()
-                                    and "Unlike".lower() not in like_button.text.lower()
-                                )
-                                videos[video_id]["liked"] = not not_liked
-                                if not_liked:
-                                    like_button.click()
-                                    WebDriverWait(driver, 3).until(
-                                        EC.visibility_of_element_located(
-                                            (By.ID, "_nonexistantID_")
-                                        )
-                                    )
-                                    liked_videos.append(video_id)
-                        except TimeoutException as e:
-                            pass
-                        except Exception as e:
-                            logging.exception(e)
-
                     if skip and not overwrite_small_files:
                         break
                     # Download
                     Path(download_dir).mkdir(parents=True, exist_ok=True)
                     chunk_size = 1024 * 1024  # 1 MB
                     response = requests.get(
-                        video_download_url,
+                        vid_info['video_download_url'],
                         headers=headers,
                         cookies=cookies,
                         stream=True,
@@ -886,11 +972,11 @@ try:
                     filename = (
                         filename_download.format(
                             username=videos[video_id]["username"],
-                            title=videos[video_id]["title"],
+                            title=videos[video_id]["title"][:80],
                             date_str=videos[video_id]["date"],
                             video_id=video_id,
                         )
-                        + video_ext
+                        + vid_info['video_ext']
                     )
                     # filename = f"{videos[video_id]['username']} - {videos[video_id]['title']} {date_str} {video_id}.mp4"
                     filename = re_filename_invalid_chars.sub(" ", filename)
@@ -909,6 +995,8 @@ try:
                         existingMB = math.ceil(
                             os.path.getsize(existing_file) / (2**20)
                         )
+                        print(f'Existing_file: {video_id} "{existing_file}"')
+                        print("existingMB and totalMB", existingMB, totalMB)
                     existing_file_is_incomplete = (
                         existingMB and totalMB and (existingMB < totalMB)
                     )
@@ -931,6 +1019,10 @@ try:
                                 ):
                                     handle.write(data)
                         except Exception as e:
+                            try:
+                                response.close()
+                            except Exception as e:
+                                pass
                             if filepath and os.path.exists(filepath):
                                 os.remove(filepath)
                             raise
