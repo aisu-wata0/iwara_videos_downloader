@@ -20,6 +20,7 @@ from tqdm import tqdm
 
 # %%
 
+import iwa_cookies
 from iwa_cookies import cookies, headers
 from get_vids_setting import *
 
@@ -115,20 +116,30 @@ def readUrl(address):
 
 
 # %%
+
+
+import dateparser
 def get_date_str(text):
-    date_str = ""
-    date_split_strs = ["作成日:", "on "]
-    for ds in date_split_strs:
-        if ds not in text:
-            continue
-        try:
-            date_str = text.split(ds)[-1].strip()
-            break
-        except IndexError:
-            pass
-    return date_str
+    date_str = dateparser.parse(text)
+    if not date_str:
+        return date_str
+    return date_str.isoformat(timespec='hours')
 
 
+def get_date_str_from_document(element):
+    class_name = "page-video__details__subtitle"
+    submitted_str = element.find_elements(
+        by=By.CLASS_NAME, value=class_name
+    )[0].text.strip()
+    return get_date_str(submitted_str)
+
+
+def get_vid_id_from_url(url):
+    s = url.split("/")
+    for i, e in enumerate(s):
+        if e == "video":
+            return s[i+1]
+    return None
 # %%
 
 videos = {}
@@ -147,67 +158,70 @@ print(f"Found existing {len(videos.keys())} in {filepath} cache")
 
 # %%
 
-if get_liked_videos:
-    page_num = 0
-    videos_new = {}
+# OUTDATED, NOT UPDATED FROM NEW REDESIGN
 
-    try:
-        while True:
-            videos_liked_url = (
-                "https://ecchi.iwara.tv/user/liked?page="
-                + urllib.parse.quote(str(page_num))
-            )
-            print("Getting... ", videos_liked_url)
-            soup = readUrl(videos_liked_url)
-            # class_str = "node-teaser"
-            class_str = "node-video"
-            items = soup.find_all("div", class_=class_str)
-            if not items:
-                print("No items found, breaking from loop")
-                break
-            print("Got ", len(items), " items")
-            new_items = 0
-            for item in items:
-                item_link = item.find("a")
-                if item_link is not None:
-                    vid_id = item_link.get("href").split("/")[-1]
-                    if vid_id not in videos:
-                        new_items += 1
-                    videos_new[vid_id] = {
-                        "title": item.find("h3", class_="title").text,
-                        "username": item.find("a", class_="username").text,
-                        "views": item.find("div", class_="left-icon").text.strip(),
-                        "likes": item.find("div", class_="right-icon").text.strip(),
-                    }
-                    node_img = item.find("img")
-                    if node_img:
-                        videos_new[vid_id]["thumbnail"] = node_img.get("src")
 
-            print(new_items, " new items")
+# if get_liked_videos:
+#     page_num = 0
+#     videos_new = {}
 
-            page_num += 1
-            if break_when_no_new_videos:
-                if not new_items:
-                    break
+#     try:
+#         while True:
+#             videos_liked_url = (
+#                 "https://ecchi.iwara.tv/user/liked?page="
+#                 + urllib.parse.quote(str(page_num))
+#             )
+#             print("Getting... ", videos_liked_url)
+#             soup = readUrl(videos_liked_url)
+#             # class_str = "node-teaser"
+#             class_str = "node-video"
+#             items = soup.find_all("div", class_=class_str)
+#             if not items:
+#                 print("No items found, breaking from loop")
+#                 break
+#             print("Got ", len(items), " items")
+#             new_items = 0
+#             for item in items:
+#                 item_link = item.find("a")
+#                 if item_link is not None:
+#                     vid_id = item_link.get("href").split("/")[-1]
+#                     if vid_id not in videos:
+#                         new_items += 1
+#                     videos_new[vid_id] = {
+#                         "title": item.find("div", class_="text mb-1 text--h1 text--bold").text,
+#                         "username": item.find("a", class_="username").text,
+#                         "likes": item.find("div", class_="page-video__stats").text.strip().split()[1],
+#                         "views": item.find("div", class_="page-video__stats").text.strip().split()[0],
+#                     }
+#                     node_img = item.find("img")
+#                     if node_img:
+#                         videos_new[vid_id]["thumbnail"] = node_img.get("src")
 
-    except KeyboardInterrupt as e:
-        print("Stopped by keyboard interrupt")
-    except Exception as e:
-        print("Caught exception")
-        logging.exception(e)
+#             print(new_items, " new items")
 
-    if videos_new:
-        videos = {**videos_new, **videos}
-        videos = {k.lower(): v for k, v in videos.items()}
+#             page_num += 1
+#             if break_when_no_new_videos:
+#                 if not new_items:
+#                     break
 
-        print(len(videos.keys()), " videos total,", len(videos_new.keys()), " new")
+#     except KeyboardInterrupt as e:
+#         print("Stopped by keyboard interrupt")
+#     except Exception as e:
+#         print("Caught exception")
+#         logging.exception(e)
 
-        def saveNoInterrupt0():
-            save_file_json(videos_filepath, videos)
+#     if videos_new:
+#         videos = {**videos_new, **videos}
+#         videos = {k.lower(): v for k, v in videos.items()}
 
-        a = Thread(target=saveNoInterrupt0)
-        a.start()
-        a.join()
+#         print(len(videos.keys()), " videos total,", len(videos_new.keys()), " new")
+
+#         def saveNoInterrupt0():
+#             save_file_json(videos_filepath, videos)
+
+#         a = Thread(target=saveNoInterrupt0)
+#         a.start()
+#         a.join()
 
 # %%
 
@@ -245,10 +259,11 @@ def get_search_videos(search_query):
             for item in items:
                 node_username = item.find("a", class_="username")
                 if node_username is not None:
+                    username = node_username.text.strip()
                     node_title = None
                     title = None
-                    for tt in ["h1", "h3"]:
-                        node_title = item.find(tt, class_="title")
+                    for tt in ["div", "h1", "h3"]:
+                        node_title = item.find(tt, class_="videoTeaser__title")
                         if node_title:
                             title = node_title.text.strip()
                             break
@@ -258,7 +273,7 @@ def get_search_videos(search_query):
                     is_image = False
                     node_vid_id = node_title.find("a")
                     if node_vid_id:
-                        vid_id = node_vid_id.get("href").split("/")[-1]
+                        vid_id = get_vid_id_from_url(node_vid_id.get("href"))
                     else:
                         is_image = True
                         node_share = item.find("div", class_="share-icons").find("a")
@@ -267,35 +282,21 @@ def get_search_videos(search_query):
                     if vid_id not in searches.get(search_query, {}):
                         new_items += 1
                     searches_new[vid_id] = {
-                        "username": node_username.text,
+                        "username": username,
                     }
                     searches_new[vid_id]["title"] = title
                     searches_new[vid_id]["is_image"] = is_image
                     node_img = item.find("img")
                     if node_img:
                         searches_new[vid_id]["thumbnail"] = node_img.get("src")
-                    node_views = item.find("div", class_="node-views")
-                    if node_views:
-                        searches_new[vid_id]["views"] = node_views.text.strip()
 
-                    video_info = item.find("div", class_="video-info")
-                    if video_info:
-                        searches_new[vid_id]["views"] = video_info.text.strip().split()[
-                            0
-                        ]
-                        searches_new[vid_id]["likes"] = video_info.text.strip().split()[
-                            -1
-                        ]
+                    searches_new[vid_id]["views"] = item.find("div", class_="views").text.strip()
+                    searches_new[vid_id]["likes"] = item.find("div", class_="likes").text.strip()
 
-                    video_field = item.find("div", class_="field-type-text-with-summary")
-                    if video_field:
-                        searches_new[vid_id]["description"] = str(video_field).strip()
-
-                    date_node = item.find("div", class_="submitted")
-                    if date_node:
-                        date_str = get_date_str(date_node.text)
-                        if date_str:
-                            searches_new[vid_id]["date"] = date_str
+                    class_name = "byline"
+                    date_submitted_node = item.find("div", class_=class_name)
+                    if date_submitted_node:
+                        searches_new[vid_id]["date"] = date_submitted_node.find("div", class_="text text--small").text
             print(new_items, " new items")
 
             page_num += 1
@@ -661,7 +662,7 @@ from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.remote.remote_connection import LOGGER as logger_selenium
-logger_selenium.setLevel(logging.WARNING)
+# logger_selenium.setLevel(logging.WARNING)
 
 # %%
 
@@ -670,43 +671,101 @@ chrome_options.add_argument("--headless")
 chrome_options.add_argument("--window-size=1920x1920")
 chrome_options.add_argument("--log-level=3")
 chrome_options.add_argument("--disable-logging")
+chrome_options.add_argument("--enable-javascript")
+chrome_profile_dir = './chrome_profile_1'
+# Create empty profile to start with if it's not yet used
+if not os.path.isdir(chrome_profile_dir):
+    os.mkdir(chrome_profile_dir)
+    Path(f'{chrome_profile_dir}/First Run').touch()
+chrome_options.add_argument(f'--user-data-dir={chrome_profile_dir}/')
 
-# download Chrome Webdriver
-# https://sites.google.com/a/chromium.org/chromedriver/download
-# put driver executable file in the script directory
-chrome_driver = os.path.join(os.getcwd(), "chromedriver")
+import undetected_chromedriver as uc
+driver = uc.Chrome(options=chrome_options)
 
-# driver = webdriver.Chrome(options=chrome_options, executable_path=chrome_driver)
-driver = webdriver.Chrome(
-    options=chrome_options, service=Service(ChromeDriverManager().install())
-)
+# # download Chrome Webdriver
+# # https://sites.google.com/a/chromium.org/chromedriver/download
+# # put driver executable file in the script directory
+# chrome_driver = os.path.join(os.getcwd(), "chromedriver")
 
+# # driver = webdriver.Chrome(options=chrome_options, executable_path=chrome_driver)
+# driver = webdriver.Chrome(
+#     options=chrome_options, service=Service(ChromeDriverManager().install())
+# )
 # %%
 
+def driver_sleep(secs):
+    try:
+        WebDriverWait(driver, secs).until(
+            EC.visibility_of_element_located(
+                (By.ID, "_nonexistantID_")
+            )
+        )
+    except:
+        pass
+
+# %%
 
 url_base = "https://ecchi.iwara.tv/"
 
 load_timeout = 120
 driver.set_page_load_timeout(load_timeout)
 driver.get(url_base)
+driver_sleep(2)
 for cookie in cookies.items():
     driver.add_cookie({"name": cookie[0], "value": cookie[1]})
+
+def login_to_iwara():
+    global shot_counter
+    driver.get(url_base + "login")
+    driver_sleep(1)
+    el_email = driver.find_elements(
+        by=By.NAME, value="email"
+    )[0]
+    el_pwd = driver.find_elements(
+        by=By.NAME, value="password"
+    )[0]
+    
+    el_email.send_keys(iwa_cookies.username)
+    el_pwd.send_keys(iwa_cookies.word_of_power)
+    f = driver.find_elements(
+        by=By.CLASS_NAME, value="form"
+    )[0]
+    f = f.find_elements(
+        by=By.TAG_NAME, value="button"
+    )[0].click()
+    driver_sleep(3)
+
+try:
+    login_to_iwara()
+except Exception as e:
+    logging.exception("Login fail")
+    
 
 # %%
 
 
-
 def get_vid_info(video_id, like_video=False, timeout_tries=timeout_tries, timeout_sleep=timeout_sleep):
     vid_info = {}
-    video_info_url = url_base + f"videos/{video_id}"
+    video_info_url = url_base + f"video/{video_id}"
     for i in range(timeout_tries):
         try:
             driver.get(video_info_url)
             
             if video_id not in videos:
                 videos[video_id] = {}
-            # # take a screenshot of the page
-            # driver.save_screenshot(f"{video_id}.png")
+            driver_sleep(4)
+
+
+            adult_warning = driver.find_elements(by=By.CLASS_NAME, value="adultWarning__actions")
+            if adult_warning:
+                adult_warning[0].find_elements(by=By.TAG_NAME, value="button")[0].click()
+                driver_sleep(1)
+                # # take a screenshot of the page
+                driver.find_elements(by=By.CSS_SELECTOR, value="body")[0].send_keys(Keys.PAGE_DOWN)
+            
+
+            videos[video_id]['date-accessed'] = datetime.datetime.now().isoformat(timespec='hours')
+            print("date-accessed", datetime.datetime.now().isoformat(timespec='hours'))
             try:
                 video_is_processing = driver.find_elements(
                     by=By.ID, value="video-processing"
@@ -722,96 +781,126 @@ def get_vid_info(video_id, like_video=False, timeout_tries=timeout_tries, timeou
                     return {}
             except IndexError:
                 pass
+            
+            privated = True
+            download_button = None
             try:
                 download_button = driver.find_elements(
-                    by=By.ID, value="download-button"
+                    by=By.CSS_SELECTOR, value=".downloadButton"
                 )[0]
+                privated = False
             except IndexError:
+                try:
+                    node_text = driver.find_elements(
+                        by=By.CLASS_NAME, value="page-video__stats"
+                    )[0].text.strip()
+                    videos[video_id]["likes"] = node_text.split()[0]
+                    privated = False
+                except Exception as e:
+                    logging.exception(e)
+        
+            if privated:
                 print("-- No download button found, likely privated video")
                 videos[video_id]["privated"] = True
                 return {}
+
+            
             if "privated" in videos[video_id]:
                 del videos[video_id]["privated"]
-            download_button.click()
+            
+            if download_button:
+                download_button.click()
+            else:
+                videos[video_id]["no_download_available"] = True
 
             videos[video_id]["title"] = driver.find_elements(
-                by=By.CLASS_NAME, value="title"
+                by=By.CLASS_NAME, value="text--h1"
             )[0].text.strip()
             if update_metadata or "username" not in videos[video_id]:
                 videos[video_id]["username"] = driver.find_elements(
                     by=By.CLASS_NAME, value="username"
                 )[0].text.strip()
+            
             try:
-                if update_metadata or "likes" not in videos[video_id]:
-                    node_text = driver.find_elements(
-                        by=By.CLASS_NAME, value="node-views"
-                    )[0].text.strip()
-                    videos[video_id]["likes"] = node_text.split()[0]
-                if update_metadata or "views" not in videos[video_id]:
-                    node_text = driver.find_elements(
-                        by=By.CLASS_NAME, value="node-views"
-                    )[0].text.strip()
-                    videos[video_id]["views"] = node_text.split()[1]
+                node_text = driver.find_elements(
+                    by=By.CLASS_NAME, value="page-video__stats"
+                )[0].text.strip()
+                videos[video_id]["likes"] = node_text.split()[0]
+            except Exception as e:
+                logging.exception(e)
+            try:
+                node_text = driver.find_elements(
+                    by=By.CLASS_NAME, value="page-video__stats"
+                )[0].text.strip()
+                videos[video_id]["views"] = node_text.split()[1]
+            except Exception as e:
+                logging.exception(e)
+            try:
+                date_str = get_date_str_from_document(driver)
+                videos[video_id]["date"] = date_str
             except Exception as e:
                 logging.exception(e)
 
-            WebDriverWait(driver, 7).until(
-                EC.presence_of_element_located(
-                    (By.CSS_SELECTOR, "#download-options a")
-                )
-            )
-            download_options = driver.find_elements(
-                by=By.ID, value="download-options"
-            )[0]
-            download_links = download_options.find_elements(
-                by=By.TAG_NAME, value="a"
-            )
-            download_source = download_links[0]
-            vid_info['video_download_url'] = download_source.get_attribute("href")
-            vid_info['video_ext'] = ".mp4"
-            ext_split = vid_info['video_download_url'].split("&")
-            for i in range(len(ext_split) - 1, -1, -1):
-                if "file=" in ext_split[i]:
-                    vid_info['video_ext'] = "." + ext_split[i].split(".")[-1]
-            #
+            def findAncestors(element):
+                return element.find_elements(By.XPATH, "./..")
 
-            class_name = "submitted"
-            submitted_str = driver.find_elements(
-                by=By.CLASS_NAME, value=class_name
-            )[0]
-            date_str = get_date_str(submitted_str.text)
-            if not date_str:
-                raise Exception(f"No date string found for video {video_id}")
-            date_str = re.sub(" ", "T", date_str)
-            date_str = re.sub(":", "-", date_str)
-            videos[video_id]["date"] = date_str
+            def findParent(element):
+                ancestors = findAncestors(element)
+                return ancestors[0] if ancestors else None
+            
+            def get_download_links(download_button):
+                download_div = findParent(findParent(download_button))
+                if not download_div:
+                    raise TimeoutException("No download_div")
+                driver_sleep(2)
+                download_options = download_div.find_elements(
+                    by=By.CSS_SELECTOR, value=".dropdown__content"
+                )[0]
+                download_links = download_options.find_elements(
+                    by=By.TAG_NAME, value="a"
+                )
+                if not download_links:
+                    raise TimeoutException("No download_links")
+                download_source = download_links[0]
+                return download_source
+            
+            if download_button:
+                download_source = get_download_links(download_button)
+
+                vid_info['video_download_url'] = download_source.get_attribute("href")
+                vid_info['video_ext'] = ".mp4"
+                def get_ext_from_iwara_url(url):
+                    known_exts = ["mp4", "mkv", "webm"]
+                    ext_split = url.split("&")
+                    for i in range(len(ext_split) - 1, -1, -1):
+                        s = ext_split[i].split(".")
+                        for e in s:
+                            if e in known_exts:                    
+                                return e
+
+                e = get_ext_from_iwara_url(vid_info['video_download_url'])
+                if e:
+                    vid_info['video_ext'] = "." + e
 
             if like_video:
                 try:
-                    node_buttons = driver.find_elements(
-                        by=By.CLASS_NAME, value="node-buttons"
+                    like_button = driver.find_elements(
+                        by=By.CLASS_NAME, value="likeButton"
                     )[0]
-                    buttons = node_buttons.find_elements(
-                        by=By.TAG_NAME, value="a"
-                    )
-                    like_button = None
-                    for b in buttons:
-                        if "Like".lower() in b.text.lower():
-                            like_button = b
                     if like_button:
-                        not_liked = (
+                        liked = (
                             "Like".lower() in like_button.text.lower()
                             and "Unlike".lower() not in like_button.text.lower()
                         )
-                        videos[video_id]["liked"] = not not_liked
-                        if not_liked:
+                        videos[video_id]["liked"] = not liked
+                        if liked:
                             like_button.click()
-                            WebDriverWait(driver, 3).until(
-                                EC.visibility_of_element_located(
-                                    (By.ID, "_nonexistantID_")
-                                )
+                            driver_sleep(2)
+                            liked = (
+                                "Like".lower() in like_button.text.lower()
+                                and "Unlike".lower() not in like_button.text.lower()
                             )
-                            liked_videos.append(video_id)
+                            videos[video_id]["liked"] = not liked
                 except TimeoutException as e:
                     pass
                 except Exception as e:
@@ -984,6 +1073,7 @@ try:
                     totalMB = None
                     if content_length_str:
                         totalMB = math.ceil(int(content_length_str) / chunk_size)
+                        videos[video_id]["size_total"] = totalMB
                     # check if enough disk space is available
                     _, _, diskFree = shutil.disk_usage(download_dir)
                     diskFreeMB = diskFree // (2**20)
@@ -1011,6 +1101,7 @@ try:
                         print(filepath)
                         print("")
                         try:
+                            mbIter = 0
                             with open(filepath, "wb") as handle:
                                 for data in tqdm(
                                     response.iter_content(chunk_size),
@@ -1018,6 +1109,7 @@ try:
                                     **tqdm_args,
                                 ):
                                     handle.write(data)
+                                    mbIter += 1
                         except Exception as e:
                             try:
                                 response.close()
@@ -1026,6 +1118,9 @@ try:
                             if filepath and os.path.exists(filepath):
                                 os.remove(filepath)
                             raise
+                        videos[video_id]["size_downloaded"] = mbIter
+                        if totalMB and (mbIter + 1) < totalMB:
+                            videos[video_id]["incomplete"] = True
                         if existing_file and existing_file != filepath:
                             os.remove(existing_file)
                         downloaded_videos[video_id] = videos[video_id]
