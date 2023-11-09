@@ -660,9 +660,8 @@ from selenium.webdriver.support.wait import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.remote.remote_connection import LOGGER as logger_selenium
-# logger_selenium.setLevel(logging.WARNING)
+logger_selenium.setLevel(logging.WARNING)
 
 # %%
 
@@ -672,25 +671,39 @@ chrome_options.add_argument("--window-size=1920x1920")
 chrome_options.add_argument("--log-level=3")
 chrome_options.add_argument("--disable-logging")
 chrome_options.add_argument("--enable-javascript")
-chrome_profile_dir = './chrome_profile_1'
+chrome_options.add_argument("--disable-dev-shm-usage")
+chrome_options.add_argument("--no-sandbox")
+chrome_options.add_argument("--disable-gpu")
+chrome_options.add_argument("--disable-session-crashed-bubble")
+chrome_profile_dir = 'chrome_profile_iwara'
 # Create empty profile to start with if it's not yet used
 if not os.path.isdir(chrome_profile_dir):
     os.mkdir(chrome_profile_dir)
     Path(f'{chrome_profile_dir}/First Run').touch()
 chrome_options.add_argument(f'--user-data-dir={chrome_profile_dir}/')
 
-import undetected_chromedriver as uc
-driver = uc.Chrome(options=chrome_options)
-
-# # download Chrome Webdriver
-# # https://sites.google.com/a/chromium.org/chromedriver/download
-# # put driver executable file in the script directory
+# download Chrome Webdriver
+# https://sites.google.com/a/chromium.org/chromedriver/download
+# put driver executable file in the script directory
 # chrome_driver = os.path.join(os.getcwd(), "chromedriver")
+# driver = webdriver.Chrome(options=chrome_options, executable_path=chrome_driver)
+# chrome_version = "113.0.5672.24"
+chrome_version = "114.0.5735.90"
+# chrome_version = "116.0.5845"
+from webdriver_manager.chrome import ChromeDriverManager
 
-# # driver = webdriver.Chrome(options=chrome_options, executable_path=chrome_driver)
 # driver = webdriver.Chrome(
-#     options=chrome_options, service=Service(ChromeDriverManager().install())
+#     options=chrome_options, service=Service(ChromeDriverManager(version=chrome_version).install())
 # )
+
+import undetected_chromedriver as UndetectedChromeDriver
+driver = UndetectedChromeDriver.Chrome(
+	options=chrome_options,
+	service=Service(ChromeDriverManager(version=chrome_version).install()),
+)
+
+# driver = UndetectedChromeDriver.Chrome(options=chrome_options)
+
 # %%
 
 def driver_sleep(secs):
@@ -738,7 +751,7 @@ def login_to_iwara():
 try:
     login_to_iwara()
 except Exception as e:
-    logging.exception("Login fail")
+    logging.info(f"{traceback.format_exc()}\nShould already be logged in")
     
 
 # %%
@@ -760,7 +773,6 @@ def get_vid_info(video_id, like_video=False, timeout_tries=timeout_tries, timeou
             if adult_warning:
                 adult_warning[0].find_elements(by=By.TAG_NAME, value="button")[0].click()
                 driver_sleep(1)
-                # # take a screenshot of the page
                 driver.find_elements(by=By.CSS_SELECTOR, value="body")[0].send_keys(Keys.PAGE_DOWN)
             
 
